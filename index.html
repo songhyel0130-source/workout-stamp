@@ -34,6 +34,9 @@
   button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
   .summary { display: flex; gap: 16px; align-items: center; }
   .summary .big { font-size: 17px; font-weight: 700; }
+  .fire { font-size: 40px; line-height: 1; }
+  .fire.off { filter: grayscale(1); opacity: .45; }
+  .streak-n { font-size: 26px; font-weight: 700; line-height: 1.2; }
   .today-item { display: flex; gap: 10px; align-items: center; padding: 8px 0; cursor: pointer; }
   .today-item + .today-item { border-top: 1px solid var(--line); }
   .thumb { width: 72px; height: 41px; border-radius: 6px; object-fit: cover; background: var(--cell); flex-shrink: 0; cursor: pointer; }
@@ -241,13 +244,18 @@ function addLog(vid, src, date) {
   return true;
 }
 
-function donut(done, goal) {
-  const C = 2 * Math.PI * 30;
-  const ratio = goal ? Math.min(1, done / goal) : 0;
-  return '<svg width="84" height="84" viewBox="0 0 84 84" role="img" aria-label="이번 주 ' + done + '회, 목표 ' + goal + '회">'
-    + '<circle cx="42" cy="42" r="30" fill="none" stroke="var(--cell)" stroke-width="10"/>'
-    + (ratio > 0 ? '<circle cx="42" cy="42" r="30" fill="none" stroke="var(--stamp)" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (ratio * C).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 42 42)"/>' : '')
-    + '<text x="42" y="47" text-anchor="middle" font-size="15" font-weight="700" fill="var(--text)">' + done + '/' + goal + '</text></svg>';
+function streak() {
+  const today = ymd(new Date());
+  const dates = [...new Set(state.logs.map(l => l.date))].filter(d => d <= today).sort();
+  if (!dates.length) return { n: 0, never: true };
+  const gap = Math.round((toUTC(today) - toUTC(dates[dates.length - 1])) / 864e5);
+  if (gap > 7) return { n: 0 };
+  let n = 1;
+  for (let i = dates.length - 1; i > 0; i--) {
+    if ((toUTC(dates[i]) - toUTC(dates[i - 1])) / 864e5 > 7) break;
+    n++;
+  }
+  return { n, today: gap === 0, left: 7 - gap };
 }
 
 function renderHome() {
@@ -264,9 +272,12 @@ function renderHome() {
   list.forEach(v => { done += Math.min(weekCount(v.id), tgt(v)); goal += tgt(v); });
   const todayCount = new Set(state.logs.filter(l => l.date === today).map(l => l.vid)).size;
   const left = goal - done;
-  let html = '<div class="card"><div class="summary">' + donut(done, goal)
-    + '<div><div class="big">' + (left > 0 ? '이번 주 ' + done + '회 완료' : '이번 주 목표 달성') + '</div>'
-    + '<div class="sub">' + (left > 0 ? '목표까지 ' + left + '회' : '목표 ' + goal + '회를 모두 채웠어요') + ' · 오늘 ' + todayCount + '회</div></div></div></div>';
+  const sk = streak();
+  const skMsg = sk.never ? '첫 스탬프를 찍으면 시작돼요' : sk.n === 0 ? '기록이 끊겼어요. 오늘 다시 시작해요'
+    : sk.today ? '오늘도 이어갔어요' : sk.left === 0 ? '오늘 운동해야 이어져요' : sk.left + '일 안에 운동하면 이어져요';
+  let html = '<div class="card"><div class="summary"><div class="fire' + (sk.n ? '' : ' off') + '" aria-hidden="true">🔥</div>'
+    + '<div class="grow"><div class="streak-n">' + sk.n + '일</div><div class="sub">' + skMsg + '</div></div>'
+    + '<div style="text-align:right"><div class="big">' + done + '/' + goal + '</div><div class="sub">이번 주' + (left > 0 ? '' : ' 달성') + '</div></div></div></div>';
 
   const todo = list.map(v => ({ v, left: tgt(v) - weekCount(v.id) })).filter(x => x.left > 0).sort((a, b) => b.left - a.left);
   html += '<div class="card"><h2>오늘 할 영상</h2>' + (todo.length === 0 ? '<p class="sub">이번 주 목표를 다 채웠어요.</p>'
