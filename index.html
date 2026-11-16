@@ -53,11 +53,27 @@
   .empty { text-align: center; padding: 18px 0 6px; }
   .empty p { margin-bottom: 12px; color: var(--sub); font-size: 13px; }
   .section { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 2px 8px; }
-  .vcard .top { display: flex; gap: 10px; }
+  .vcard { cursor: pointer; }
+  .vcard .top { display: flex; gap: 10px; align-items: center; }
   .vcard .thumb { width: 96px; height: 54px; }
-  .vcard .ctl { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-  .vcard .ctl .gap { flex: 1; }
-  .step { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  .chev { color: var(--sub); font-size: 20px; }
+  .back { border: none; padding: 4px 0; color: var(--sub); margin-bottom: 10px; }
+  .hero { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: var(--cell); cursor: pointer; margin-bottom: 10px; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dtitle { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+  .setrow { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; font-size: 14px; }
+  .setrow + .setrow { border-top: 1px solid var(--line); }
+  .step { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; }
+  .stats { display: flex; gap: 8px; margin-bottom: 12px; }
+  .stat { flex: 1; background: var(--bg); border-radius: 10px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 17px; }
+  .calhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  .cday { aspect-ratio: 1; border-radius: 50%; border: none; padding: 0; font-size: 13px; background: transparent; }
+  .cday.on { background: var(--stamp); color: #04342c; font-weight: 700; }
+  .cday.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+  .cday:disabled { opacity: .35; cursor: default; }
+  button.danger { color: var(--danger); width: 100%; }
   .bar { height: 6px; border-radius: 3px; background: var(--cell); overflow: hidden; margin: 6px 0 4px; }
   .bar i { display: block; height: 100%; width: 0; background: var(--stamp); }
   input[type=url] { width: 100%; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
@@ -115,6 +131,8 @@ let state = load();
 let tab = 'home';
 let adding = false;
 let addTarget = 3;
+let detailId = null;
+let calMonth = new Date();
 
 function load() {
   let s;
@@ -223,14 +241,51 @@ function renderHome() {
 function videoCard(v) {
   const c = weekCount(v.id), total = totalCount(v.id), last = lastDate(v.id);
   const pct = Math.round(Math.min(1, c / v.target) * 100);
-  return '<div class="card vcard"><div class="top">'
-    + '<img class="thumb" src="' + thumb(v.id) + '" alt="" data-act="play" data-id="' + v.id + '">'
+  return '<div class="card vcard" data-act="detail" data-id="' + v.id + '"><div class="top">'
+    + '<img class="thumb" src="' + thumb(v.id) + '" alt="">'
     + '<div class="grow"><div class="title2">' + esc(v.title) + '</div>'
     + (v.routine ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : '')
-    + '<div class="sub">' + (v.routine ? '이번 주 ' + c + '/' + v.target + ' · ' : '') + '누적 ' + total + '회' + (last ? ' · 최근 ' + last : '') + '</div></div></div>'
-    + '<div class="ctl"><button class="small' + (v.routine ? ' on' : '') + '" data-act="routine" data-id="' + v.id + '" aria-pressed="' + v.routine + '">' + (v.routine ? '루틴 ✓' : '루틴에 추가') + '</button>'
-    + '<span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + v.target + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span>'
-    + '<span class="gap"></span><button class="small" data-act="play" data-id="' + v.id + '">재생</button><button class="small" data-act="remove" data-id="' + v.id + '">삭제</button></div></div>';
+    + '<div class="sub">' + (v.routine ? '이번 주 ' + c + '/' + v.target + ' · ' : '') + '누적 ' + total + '회' + (last ? ' · 최근 ' + last : '') + '</div></div>'
+    + '<span class="chev" aria-hidden="true">›</span></div></div>';
+}
+
+function renderDetail() {
+  const v = state.videos.find(x => x.id === detailId);
+  const today = ymd(new Date());
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  const prefix = y + '-' + String(m + 1).padStart(2, '0') + '-';
+  const dates = new Set(state.logs.filter(l => l.vid === v.id).map(l => l.date));
+  const monthCount = state.logs.filter(l => l.vid === v.id && l.date.startsWith(prefix)).length;
+  const last = lastDate(v.id);
+  const now = new Date();
+  const isCurMonth = y === now.getFullYear() && m === now.getMonth();
+  const blanks = (new Date(y, m, 1).getDay() + 6) % 7;
+  const days = new Date(y, m + 1, 0).getDate();
+  let cal = '';
+  for (let i = 0; i < blanks; i++) cal += '<span></span>';
+  for (let d = 1; d <= days; d++) {
+    const date = prefix + String(d).padStart(2, '0');
+    const on = dates.has(date);
+    cal += '<button class="cday' + (on ? ' on' : '') + (date === today ? ' today' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + date + '"'
+      + (date > today ? ' disabled' : '') + ' aria-label="' + date + (on ? ' 완료' : ' 미완료') + '">' + d + '</button>';
+  }
+  return '<button class="back" data-act="back">‹ 내 영상</button>'
+    + '<div class="hero" data-act="play" data-id="' + v.id + '"><img src="' + thumb(v.id) + '" alt=""></div>'
+    + '<div class="dtitle">' + esc(v.title) + '</div>'
+    + '<button class="primary" style="width:100%;margin-bottom:14px" data-act="play" data-id="' + v.id + '">재생</button>'
+    + '<div class="card"><h2>목표</h2>'
+    + '<div class="setrow"><span>이번 주 루틴</span><button class="small' + (v.routine ? ' on' : '') + '" data-act="routine" data-id="' + v.id + '" aria-pressed="' + v.routine + '">' + (v.routine ? '루틴 ✓' : '루틴에 추가') + '</button></div>'
+    + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + v.target + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span></div></div>'
+    + '<div class="card"><h2>수행 이력</h2>'
+    + '<div class="stats"><div class="stat"><span class="sub">지금까지</span><b>' + totalCount(v.id) + '회</b></div>'
+    + '<div class="stat"><span class="sub">' + (m + 1) + '월</span><b>' + monthCount + '회</b></div>'
+    + '<div class="stat"><span class="sub">최근</span><b>' + (last || '-') + '</b></div></div>'
+    + '<div class="calhead"><button class="small" data-act="cal-prev" aria-label="이전 달">‹</button><span>' + y + '년 ' + (m + 1) + '월</span>'
+    + '<button class="small" data-act="cal-next" aria-label="다음 달"' + (isCurMonth ? ' disabled' : '') + '>›</button></div>'
+    + '<div class="days">' + DAY_NAMES.map(n => '<span>' + n + '</span>').join('') + '</div>'
+    + '<div class="cal">' + cal + '</div>'
+    + '<p class="sub" style="margin-top:10px">날짜를 누르면 직접 체크하거나 지울 수 있어요.</p></div>'
+    + '<button class="danger" data-act="remove" data-id="' + v.id + '">영상 삭제</button>';
 }
 
 function renderVideos() {
@@ -255,10 +310,12 @@ function renderVideos() {
 function render() {
   const w = weekDates();
   document.getElementById('week-range').textContent = w[0].slice(5).replace('-', '.') + ' ~ ' + w[6].slice(5).replace('-', '.');
-  document.getElementById('page-title').textContent = tab === 'home' ? '운동 스탬프' : '내 영상';
+  if (detailId && !state.videos.some(x => x.id === detailId)) detailId = null;
+  document.getElementById('week-range').hidden = !!detailId;
+  document.getElementById('page-title').textContent = detailId ? '영상 상세' : tab === 'home' ? '운동 스탬프' : '내 영상';
   document.getElementById('nav-home').className = tab === 'home' ? 'cur' : '';
   document.getElementById('nav-videos').className = tab === 'videos' ? 'cur' : '';
-  document.getElementById('view').innerHTML = tab === 'home' ? renderHome() : renderVideos();
+  document.getElementById('view').innerHTML = detailId ? renderDetail() : tab === 'home' ? renderHome() : renderVideos();
 }
 
 async function submitAdd() {
@@ -283,7 +340,10 @@ document.addEventListener('click', e => {
   if (!el) return;
   const act = el.dataset.act, id = el.dataset.id;
   const v = id ? state.videos.find(x => x.id === id) : null;
-  if (act === 'tab') { tab = el.dataset.tab; adding = false; render(); window.scrollTo(0, 0); }
+  if (act === 'tab') { tab = el.dataset.tab; adding = false; detailId = null; render(); window.scrollTo(0, 0); }
+  else if (act === 'detail') { detailId = id; const n = new Date(); calMonth = new Date(n.getFullYear(), n.getMonth(), 1); render(); window.scrollTo(0, 0); }
+  else if (act === 'back') { detailId = null; render(); }
+  else if (act === 'cal-prev' || act === 'cal-next') { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + (act === 'cal-next' ? 1 : -1), 1); render(); }
   else if (act === 'go-add') { tab = 'videos'; adding = true; render(); document.getElementById('add-url').focus(); }
   else if (act === 'open-add') { adding = true; render(); document.getElementById('add-url').focus(); }
   else if (act === 'cancel-add') { adding = false; render(); }
