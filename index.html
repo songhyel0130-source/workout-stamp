@@ -52,7 +52,8 @@
   .cell { height: 30px; border-radius: 7px; background: var(--cell); border: none; padding: 0; color: #04342c; font-size: 14px; font-weight: 700; }
   .cell.on { background: var(--stamp); }
   .cell.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
-  .cell:disabled { opacity: .45; cursor: default; }
+  .cell:disabled { cursor: default; }
+  .cell.future { opacity: .45; }
   .empty { text-align: center; padding: 18px 0 6px; }
   .empty p { margin-bottom: 12px; color: var(--sub); font-size: 13px; }
   .section { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 2px 8px; }
@@ -75,7 +76,8 @@
   .cday { aspect-ratio: 1; border-radius: 50%; border: none; padding: 0; font-size: 13px; background: transparent; }
   .cday.on { background: var(--stamp); color: #04342c; font-weight: 700; }
   .cday.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
-  .cday:disabled { opacity: .35; cursor: default; }
+  .cday:disabled { cursor: default; color: inherit; }
+  .cday.future { opacity: .35; }
   .cday.inp:not(.on) { background: var(--cell); }
   .pill { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 1px 7px; border-radius: 9px; font-weight: 700; }
   button.danger { color: var(--danger); width: 100%; }
@@ -258,26 +260,29 @@ function streak() {
   return { n, today: gap === 0, left: 7 - gap };
 }
 
+function streakCard(right) {
+  const sk = streak();
+  const skMsg = sk.never ? '첫 스탬프를 찍으면 시작돼요' : sk.n === 0 ? '기록이 끊겼어요. 오늘 다시 시작해요'
+    : sk.today ? '오늘도 이어갔어요' : sk.left === 0 ? '오늘 운동해야 이어져요' : sk.left + '일 안에 운동하면 이어져요';
+  return '<div class="card"><div class="summary"><div class="fire' + (sk.n ? '' : ' off') + '" aria-hidden="true">🔥</div>'
+    + '<div class="grow"><div class="streak-n">' + sk.n + '일</div><div class="sub">' + skMsg + '</div></div>' + (right || '') + '</div></div>';
+}
+
 function renderHome() {
   const w = weekDates();
   const today = ymd(new Date());
   const list = routine();
   if (state.videos.length === 0) {
-    return '<div class="card"><div class="empty"><p>이번 주에 할 운동 영상을 등록해 보세요.</p><button class="primary" data-act="go-add">첫 영상 추가</button></div></div>';
+    return (state.logs.length ? streakCard() : '') + '<div class="card"><div class="empty"><p>이번 주에 할 운동 영상을 등록해 보세요.</p><button class="primary" data-act="go-add">첫 영상 추가</button></div></div>';
   }
   if (list.length === 0) {
-    return '<div class="card"><div class="empty"><p>이번 주 루틴으로 고른 영상이 없어요.<br>영상 탭에서 루틴을 켜 주세요.</p><button class="primary" data-act="tab" data-tab="videos">영상 고르기</button></div></div>';
+    return streakCard() + '<div class="card"><div class="empty"><p>이번 주 루틴으로 고른 영상이 없어요.<br>영상 탭에서 루틴을 켜 주세요.</p><button class="primary" data-act="tab" data-tab="videos">영상 고르기</button></div></div>';
   }
   let done = 0, goal = 0;
   list.forEach(v => { done += Math.min(weekCount(v.id), tgt(v)); goal += tgt(v); });
   const todayCount = new Set(state.logs.filter(l => l.date === today).map(l => l.vid)).size;
   const left = goal - done;
-  const sk = streak();
-  const skMsg = sk.never ? '첫 스탬프를 찍으면 시작돼요' : sk.n === 0 ? '기록이 끊겼어요. 오늘 다시 시작해요'
-    : sk.today ? '오늘도 이어갔어요' : sk.left === 0 ? '오늘 운동해야 이어져요' : sk.left + '일 안에 운동하면 이어져요';
-  let html = '<div class="card"><div class="summary"><div class="fire' + (sk.n ? '' : ' off') + '" aria-hidden="true">🔥</div>'
-    + '<div class="grow"><div class="streak-n">' + sk.n + '일</div><div class="sub">' + skMsg + '</div></div>'
-    + '<div style="text-align:right"><div class="big">' + done + '/' + goal + '</div><div class="sub">이번 주' + (left > 0 ? '' : ' 달성') + '</div></div></div></div>';
+  let html = streakCard('<div style="text-align:right"><div class="big">' + done + '/' + goal + '</div><div class="sub">이번 주' + (left > 0 ? '' : ' 달성') + '</div></div>');
 
   const todo = list.map(v => ({ v, left: tgt(v) - weekCount(v.id) })).filter(x => x.left > 0).sort((a, b) => b.left - a.left);
   html += '<div class="card"><h2>오늘 할 영상</h2>' + (todo.length === 0 ? '<p class="sub">이번 주 목표를 다 채웠어요.</p>'
@@ -286,13 +291,13 @@ function renderHome() {
         + '<div class="grow"><div class="title">' + esc(x.v.title) + '</div><span class="badge">' + x.left + '회 남음</span></div>'
         + (i === 0 ? '<button class="primary">시작</button>' : '') + '</div>').join('')) + '</div>';
 
-  html += '<div class="card"><div class="row-between"><h2>이번 주</h2><span class="sub">칸을 누르면 직접 체크</span></div>'
+  html += '<div class="card"><div class="row-between"><h2>이번 주</h2><span class="sub">오늘 칸을 누르면 직접 체크</span></div>'
     + '<div class="days">' + w.map((d, i) => '<span class="' + (d === today ? 'now' : '') + '">' + DAY_NAMES[i] + '</span>').join('') + '</div>'
     + list.map(v => {
       const cells = w.map(d => {
         const on = state.logs.some(l => l.vid === v.id && l.date === d);
-        return '<button class="cell' + (on ? ' on' : '') + (d === today ? ' today' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + d + '"'
-          + (d > today ? ' disabled' : '') + ' aria-label="' + d + (on ? ' 완료' : ' 미완료') + '">' + (on ? '✓' : '') + '</button>';
+        return '<button class="cell' + (on ? ' on' : '') + (d === today ? ' today' : '') + (d > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + d + '"'
+          + (d !== today ? ' disabled' : '') + ' aria-label="' + d + (on ? ' 완료' : ' 미완료') + '">' + (on ? '✓' : '') + '</button>';
       }).join('');
       return '<div class="vrow"><div class="meta"><span class="title grow">' + esc(v.title) + '</span><span class="sub">' + weekCount(v.id) + '/' + tgt(v) + '</span></div><div class="cells">' + cells + '</div></div>';
     }).join('') + '</div>';
@@ -329,8 +334,8 @@ function renderDetail() {
   for (let d = 1; d <= days; d++) {
     const date = prefix + String(d).padStart(2, '0');
     const on = dates.has(date);
-    cal += '<button class="cday' + (on ? ' on' : '') + (date === today ? ' today' : '') + (pe && date >= v.start && date <= pe ? ' inp' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + date + '"'
-      + (date > today ? ' disabled' : '') + ' aria-label="' + date + (on ? ' 완료' : ' 미완료') + '">' + d + '</button>';
+    cal += '<button class="cday' + (on ? ' on' : '') + (date === today ? ' today' : '') + (pe && date >= v.start && date <= pe ? ' inp' : '') + (date > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + date + '"'
+      + (date !== today ? ' disabled' : '') + ' aria-label="' + date + (on ? ' 완료' : ' 미완료') + '">' + d + '</button>';
   }
   return '<button class="back" data-act="back">‹ 내 영상</button>'
     + '<div class="hero" data-act="play" data-id="' + v.id + '"><img src="' + thumb(v.id) + '" alt=""></div>'
@@ -352,7 +357,7 @@ function renderDetail() {
     + '<button class="small" data-act="cal-next" aria-label="다음 달"' + (isCurMonth ? ' disabled' : '') + '>›</button></div>'
     + '<div class="days">' + DAY_NAMES.map(n => '<span>' + n + '</span>').join('') + '</div>'
     + '<div class="cal">' + cal + '</div>'
-    + '<p class="sub" style="margin-top:10px">날짜를 누르면 직접 체크하거나 지울 수 있어요. 옅게 칠해진 날짜가 목표 기간이에요.</p></div>'
+    + '<p class="sub" style="margin-top:10px">오늘 날짜만 직접 체크하거나 지울 수 있어요. 옅게 칠해진 날짜가 목표 기간이에요.</p></div>'
     + '<button class="danger" data-act="remove" data-id="' + v.id + '">영상 삭제</button>';
 }
 
@@ -426,9 +431,10 @@ document.addEventListener('click', e => {
   else if (act === 'play') openPlayer(id);
   else if (act === 'toggle') {
     const date = el.dataset.date;
+    if (date !== ymd(new Date())) return;
     const has = state.logs.some(l => l.vid === id && l.date === date);
     if (has) {
-      if (!confirm('이 날의 스탬프를 지울까요?')) return;
+      if (!confirm('오늘 스탬프를 지울까요?')) return;
       state.logs = state.logs.filter(l => !(l.vid === id && l.date === date)); save();
     } else addLog(id, 'manual', date);
     render();
@@ -454,9 +460,8 @@ document.addEventListener('click', e => {
     save(); render();
   }
   else if (act === 'remove') {
-    if (!confirm('"' + v.title + '" 영상을 삭제할까요? 기록도 함께 지워져요.')) return;
+    if (!confirm('"' + v.title + '" 영상을 삭제할까요? 운동한 기록과 연속 기록은 유지돼요.')) return;
     state.videos = state.videos.filter(x => x.id !== id);
-    state.logs = state.logs.filter(l => l.vid !== id);
     save(); render();
   }
 });
