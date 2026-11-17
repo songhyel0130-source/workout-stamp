@@ -110,6 +110,13 @@
   #toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--text); color: var(--bg);
     font-size: 13px; padding: 10px 16px; border-radius: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; white-space: nowrap; }
   #toast.show { opacity: 1; }
+  #sheet { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 15; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .sheet-in { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 18px 16px; width: 100%; max-width: 360px; text-align: center; }
+  .sheet-in .emoji { font-size: 40px; line-height: 1; margin-bottom: 8px; }
+  .sheet-in h2 { font-size: 18px; margin-bottom: 8px; }
+  .sheet-in .sub { margin: 4px 0 16px; }
+  .sheet-in button { width: 100%; margin-top: 8px; }
+  .sheet-in button.ghost { border-color: transparent; color: var(--sub); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -134,6 +141,16 @@
     <button id="p-manual" style="width:100%;margin-top:10px">다 했어요</button>
   </div>
 </div>
+
+<div id="sheet" hidden><div class="sheet-in" role="dialog" aria-modal="true" aria-labelledby="s-head">
+  <div class="emoji" aria-hidden="true">🎉</div>
+  <h2 id="s-head">루틴 달성!</h2>
+  <div class="title2" id="s-title"></div>
+  <div class="sub" id="s-line"></div>
+  <button class="primary" data-act="ach-restart">새 목표로 다시 시작</button>
+  <button data-act="ach-archive">보관함으로</button>
+  <button class="ghost" data-act="ach-later">나중에</button>
+</div></div>
 
 <div id="toast"></div>
 
@@ -197,9 +214,16 @@ function tgt(v) { return v.run ? v.run.wt[Math.max(0, Math.min(v.run.wt.length -
 function goal(v) { return v.run.wt.reduce((a, b) => a + b, 0); }
 function periodCount(v) {
   const e = periodEnd(v);
-  return new Set(state.logs.filter(l => l.vid === v.id && l.date >= v.run.start && l.date <= e).map(l => l.date)).size;
+  const lo = v.run.from || v.run.start;
+  return new Set(state.logs.filter(l => l.vid === v.id && l.date >= lo && l.date <= e).map(l => l.date)).size;
 }
-function startRun(v) { v.run = { start: mondayOf(new Date()), wt: Array(v.weeks).fill(v.target) }; }
+function isAchieved(v) { return !!v.run && periodCount(v) >= goal(v); }
+function startRun(v) {
+  const mon = mondayOf(new Date()), lp = v.past[v.past.length - 1];
+  v.run = { start: mon, wt: Array(v.weeks).fill(v.target) };
+  // 같은 주에 끝난 이전 루틴이 있으면, 그 루틴이 끝난 날까지의 스탬프는 새 루틴에 세지 않는다
+  if (lp && lp.end >= mon) v.run.from = addDays(lp.end, 1);
+}
 function endRun(v, result) {
   const done = periodCount(v), g = goal(v);
   v.past.push({ start: v.run.start, end: result === 'stopped' ? ymd(new Date()) : periodEnd(v), weeks: v.run.wt.length, goal: g, done, result: done >= g ? 'done' : (result || 'short') });
@@ -225,7 +249,9 @@ function weekDates() {
 }
 function weekCount(vid) {
   const w = weekDates();
-  return new Set(state.logs.filter(l => l.vid === vid && l.date >= w[0] && l.date <= w[6]).map(l => l.date)).size;
+  const v = state.videos.find(x => x.id === vid);
+  const lo = v && v.run && v.run.from && v.run.from > w[0] ? v.run.from : w[0];
+  return new Set(state.logs.filter(l => l.vid === vid && l.date >= lo && l.date <= w[6]).map(l => l.date)).size;
 }
 function totalCount(vid) { return new Set(state.logs.filter(l => l.vid === vid).map(l => l.date)).size; }
 function doneOn(vid, date) { return state.logs.some(l => l.vid === vid && l.date === date); }
@@ -313,14 +339,16 @@ function renderHome() {
     const state2 = routineDone ? '루틴 달성' : left <= 0 ? '이번 주 달성' : left + '회 남음';
     const todoNow = !doneToday && !routineDone && left > 0;
     const rank = todoNow ? 0 : (doneToday && !routineDone && left > 0) ? 1 : 2;
-    return { v, left, rank, todoNow, achieved: routineDone || left <= 0, label: (doneToday ? '오늘 완료 ✓ · ' : '') + state2 };
+    return { v, left, rank, todoNow, routineDone, label: (doneToday ? '오늘 완료 ✓ · ' : '') + state2 };
   }).sort((a, b) => a.rank - b.rank || b.left - a.left);
   const anyTodo = items.some(x => x.todoNow);
   html += '<div class="card"><h2>진행 중인 루틴</h2>' + (anyTodo ? '' : '<p class="sub">오늘 할 건 다 했어요.</p>')
     + items.map((x, i) => '<div class="today-item" data-act="play" data-id="' + x.v.id + '">'
         + '<img class="thumb" src="' + thumb(x.v.id) + '" alt="">'
         + '<div class="grow"><div class="title">' + esc(x.v.title) + '</div><span class="badge' + (x.todoNow ? '' : ' mute') + '">' + x.label + '</span></div>'
-        + '<button class="small ' + (x.todoNow ? (i === 0 ? 'primary' : '') : x.achieved ? 'on' : 'checked') + '"' + (x.todoNow || x.achieved ? '' : ' aria-label="오늘 완료"') + '>' + (x.todoNow ? '시작' : x.achieved ? '달성' : '✓') + '</button></div>').join('') + '</div>';
+        + (x.todoNow ? '<button class="small' + (i === 0 ? ' primary' : '') + '">시작</button>'
+          : x.routineDone ? '<button class="small on" data-act="achieve" data-id="' + x.v.id + '">다음 정하기</button>'
+          : '<button class="small checked" aria-label="' + (x.left > 0 ? '오늘 완료' : '이번 주 달성') + '">✓</button>') + '</div>').join('') + '</div>';
 
   html += '<div class="card"><div class="row-between"><h2>이번 주</h2><span class="sub">오늘 칸을 누르면 직접 체크</span></div>'
     + '<div class="days">' + w.map((d, i) => '<span class="' + (d === today ? 'now' : '') + '">' + DAY_NAMES[i] + '</span>').join('') + '</div>'
@@ -376,9 +404,13 @@ function renderDetail() {
       ? '<div class="card"><h2>진행 중인 루틴</h2>'
         + '<div class="sub" style="margin-bottom:4px">' + md(v.run.start) + ' ~ ' + md(pe) + '</div>'
         + '<div class="row-between"><b>' + periodLine(v) + '</b></div><div class="bar"><i style="width:' + Math.round(Math.min(1, periodCount(v) / goal(v)) * 100) + '%"></i></div>'
+        + (isAchieved(v)
+          ? '<p class="sub" style="margin:10px 0">목표를 모두 채웠어요. 목표를 바꾸려면 새 루틴으로 다시 시작해 주세요.</p>'
+            + '<button class="on" style="width:100%" data-act="achieve" data-id="' + v.id + '">다음 정하기</button></div>'
+          : ''
     + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + tgt(v) + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span></div>'
     + '<div class="setrow"><span>기간</span><span class="step"><button class="small" data-act="p-minus" data-id="' + v.id + '" aria-label="기간 줄이기">−</button>' + v.weeks + '주<button class="small" data-act="p-plus" data-id="' + v.id + '" aria-label="기간 늘리기">+</button></span></div>'
-        + '<button style="width:100%;margin-top:10px" data-act="stop" data-id="' + v.id + '">루틴 그만하기</button></div>'
+        + '<button style="width:100%;margin-top:10px" data-act="stop" data-id="' + v.id + '">루틴 그만하기</button></div>')
       : '<div class="card"><h2>' + (lastPast ? '다시 시작' : '루틴 시작') + '</h2>'
         + (lastPast ? '<div class="sub" style="margin-bottom:4px">지난 루틴 · ' + pastLine(lastPast) + ' (' + md(lastPast.start) + ' ~ ' + md(lastPast.end) + ')</div>' : '')
     + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + tgt(v) + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span></div>'
@@ -482,8 +514,13 @@ document.addEventListener('click', e => {
     if (has) {
       if (!confirm('오늘 스탬프를 지울까요?')) return;
       state.logs = state.logs.filter(l => !(l.vid === id && l.date === date)); save();
-    } else addLog(id, 'manual', date);
-    render();
+      render();
+    } else {
+      const was = v && isAchieved(v);
+      addLog(id, 'manual', date);
+      render();
+      if (v && !was && isAchieved(v)) openAchieve(id);
+    }
   }
   else if (act === 'start') {
     if (routine().length >= MAX_ROUTINE) { toast('루틴은 5개까지예요. 하나를 그만두고 시작해 주세요'); return; }
@@ -497,11 +534,14 @@ document.addEventListener('click', e => {
     toast(achieved ? '달성으로 기록했어요' : '루틴을 그만했어요');
   }
   else if (act === 't-minus' || act === 't-plus') {
+    if (isAchieved(v)) return;
     v.target = Math.min(7, Math.max(1, tgt(v) + (act === 't-plus' ? 1 : -1)));
     if (v.run) for (let i = Math.max(0, weekIdx(v)); i < v.run.wt.length; i++) v.run.wt[i] = v.target;
     save(); render();
+    if (isAchieved(v)) openAchieve(id);
   }
   else if (act === 'p-minus' || act === 'p-plus') {
+    if (isAchieved(v)) return;
     const cur = v.run ? v.run.wt.length : v.weeks;
     const min = v.run ? weekIdx(v) + 1 : 1;
     const n = Math.min(12, Math.max(min, cur + (act === 'p-plus' ? 1 : -1)));
@@ -509,6 +549,24 @@ document.addEventListener('click', e => {
     v.weeks = n;
     if (v.run) { while (v.run.wt.length < n) v.run.wt.push(v.target); v.run.wt.length = n; }
     save(); render();
+    if (isAchieved(v)) openAchieve(id);
+  }
+  else if (act === 'achieve') openAchieve(id);
+  else if (act === 'ach-later') history.back();
+  else if (act === 'ach-archive' || act === 'ach-restart') {
+    const aid = achieveId, av = state.videos.find(x => x.id === aid);
+    afterBack = () => {
+      if (!av || !isAchieved(av)) { render(); return; }
+      endRun(av, 'stopped'); save();
+      if (act === 'ach-restart' && detailId !== aid) {
+        history.pushState({ layer: 'detail' }, ''); detailId = aid;
+        const n = new Date(); calMonth = new Date(n.getFullYear(), n.getMonth(), 1);
+      }
+      render();
+      if (act === 'ach-restart') window.scrollTo(0, 0);
+      toast(act === 'ach-restart' ? '달성으로 기록했어요. 새 목표를 정해 주세요' : '달성으로 기록하고 보관함으로 옮겼어요');
+    };
+    history.back();
   }
   else if (act === 'remove') {
     if (v.run) return;
@@ -569,8 +627,10 @@ function tick() {
 function stamp(src) {
   if (!session || session.stamped) return;
   session.stamped = true;
-  addLog(session.id, src);
   const v = state.videos.find(x => x.id === session.id);
+  const was = isAchieved(v);
+  addLog(session.id, src);
+  if (!was && isAchieved(v)) session.achieved = true;
   const msg = v.run ? '스탬프 완료 · 이번 주 ' + weekCount(v.id) + '/' + tgt(v) : '스탬프 완료 · 누적 ' + totalCount(v.id) + '회';
   document.getElementById('p-progress').textContent = msg;
   document.getElementById('p-manual').hidden = true;
@@ -579,16 +639,32 @@ function stamp(src) {
 function closePlayer() {
   clearInterval(ticker);
   if (player && player.destroy) player.destroy();
+  const ach = session && session.achieved ? session.id : null;
   player = null; session = null;
   document.querySelector('.frame').innerHTML = '<div id="yt"></div>';
   document.getElementById('player-view').hidden = true;
   render();
+  if (ach) setTimeout(() => openAchieve(ach), 0);
+}
+
+let achieveId = null;
+function openAchieve(id) {
+  const v = state.videos.find(x => x.id === id);
+  if (!v || !isAchieved(v) || achieveId) return;
+  achieveId = id;
+  const pe = periodEnd(v), early = ymd(new Date()) < pe;
+  document.getElementById('s-title').textContent = v.title;
+  document.getElementById('s-line').textContent = periodCount(v) + '/' + goal(v) + '회 · ' + md(v.run.start) + ' ~ ' + md(pe)
+    + (early ? ' · 다시 시작하거나 보관함으로 옮기면 남은 기간은 여기서 끝나요' : '');
+  document.getElementById('sheet').hidden = false;
+  history.pushState({ layer: 'sheet' }, '');
 }
 document.getElementById('p-close').addEventListener('click', () => history.back());
 
 let afterBack = null;
 window.addEventListener('popstate', () => {
-  if (!document.getElementById('player-view').hidden) closePlayer();
+  if (achieveId) { achieveId = null; document.getElementById('sheet').hidden = true; }
+  else if (!document.getElementById('player-view').hidden) closePlayer();
   else if (detailId) { detailId = null; render(); }
   const f = afterBack; afterBack = null;
   if (f) f();
