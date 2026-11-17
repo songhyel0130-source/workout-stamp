@@ -144,6 +144,7 @@ let adding = false;
 let addTarget = 3;
 let addWeeks = 4;
 let addUrl = '';
+let addStart = null;
 let detailId = null;
 let calMonth = new Date();
 
@@ -151,17 +152,30 @@ function load() {
   let s;
   try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
   if (!s || !Array.isArray(s.videos) || !Array.isArray(s.logs)) s = { videos: [], logs: [] };
+  const today = ymd(new Date());
   s.videos.forEach(v => {
+    if (v.run !== undefined) return;
     if (v.routine === undefined) v.routine = true;
     if (!v.past) v.past = [];
     if (!v.weeks) {
       v.weeks = 4; v.start = null; v.wt = [];
       if (v.routine) {
         v.start = mondayOf(new Date(v.addedAt || Date.now()));
-        if (addDays(v.start, 27) < ymd(new Date())) v.start = mondayOf(new Date());
+        if (addDays(v.start, 27) < today) v.start = mondayOf(new Date());
         v.wt = Array(4).fill(v.target);
       }
     }
+    v.past.forEach(p => { if (!p.result) p.result = p.done >= p.goal ? 'done' : 'short'; if (!p.end) p.end = addDays(p.start, p.weeks * 7 - 1); });
+    v.run = null;
+    if (v.start && v.wt && v.wt.length) {
+      const end = addDays(v.start, v.wt.length * 7 - 1);
+      const g = v.wt.reduce((a, b) => a + b, 0);
+      const done = new Set(s.logs.filter(l => l.vid === v.id && l.date >= v.start && l.date <= end).map(l => l.date)).size;
+      if (today > end) v.past.push({ start: v.start, end, weeks: v.wt.length, goal: g, done, result: done >= g ? 'done' : 'short' });
+      else if (!v.routine) v.past.push({ start: v.start, end: today, weeks: v.wt.length, goal: g, done, result: 'stopped' });
+      else v.run = { start: v.start, wt: v.wt };
+    }
+    delete v.routine; delete v.start; delete v.wt;
   });
   return s;
 }
@@ -174,32 +188,32 @@ function mondayOf(d) { return ymd(new Date(d.getFullYear(), d.getMonth(), d.getD
 function toUTC(s) { const a = s.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]); }
 function addDays(s, n) { const d = new Date(toUTC(s) + n * 864e5); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); }
 function md(s) { return s.slice(5).replace('-', '.'); }
-function periodEnd(v) { return addDays(v.start, v.wt.length * 7 - 1); }
-function status(v) { return !v.start ? 'wait' : ymd(new Date()) > periodEnd(v) ? 'ended' : 'active'; }
-function weekIdx(v) { return Math.round((toUTC(mondayOf(new Date())) - toUTC(v.start)) / (7 * 864e5)); }
-function tgt(v) { return status(v) === 'active' ? v.wt[Math.max(0, Math.min(v.wt.length - 1, weekIdx(v)))] : v.target; }
-function goal(v) { return v.wt.reduce((a, b) => a + b, 0); }
+function periodEnd(v) { return addDays(v.run.start, v.run.wt.length * 7 - 1); }
+function weekIdx(v) { return Math.round((toUTC(mondayOf(new Date())) - toUTC(v.run.start)) / (7 * 864e5)); }
+function tgt(v) { return v.run ? v.run.wt[Math.max(0, Math.min(v.run.wt.length - 1, weekIdx(v)))] : v.target; }
+function goal(v) { return v.run.wt.reduce((a, b) => a + b, 0); }
 function periodCount(v) {
-  if (!v.start) return 0;
   const e = periodEnd(v);
-  return new Set(state.logs.filter(l => l.vid === v.id && l.date >= v.start && l.date <= e).map(l => l.date)).size;
+  return new Set(state.logs.filter(l => l.vid === v.id && l.date >= v.run.start && l.date <= e).map(l => l.date)).size;
 }
-function startPeriod(v) {
-  if (v.start) v.past.push({ start: v.start, weeks: v.wt.length, goal: goal(v), done: periodCount(v) });
-  v.start = mondayOf(new Date());
-  v.wt = Array(v.weeks).fill(v.target);
+function startRun(v) { v.run = { start: mondayOf(new Date()), wt: Array(v.weeks).fill(v.target) }; }
+function endRun(v, result) {
+  const done = periodCount(v), g = goal(v);
+  v.past.push({ start: v.run.start, end: result === 'stopped' ? ymd(new Date()) : periodEnd(v), weeks: v.run.wt.length, goal: g, done, result: result || (done >= g ? 'done' : 'short') });
+  v.run = null;
 }
 function expire() {
   let changed = false;
-  state.videos.forEach(v => { if (v.routine && status(v) === 'ended') { v.routine = false; changed = true; } });
+  state.videos.forEach(v => { if (v.run && ymd(new Date()) > periodEnd(v)) { endRun(v); changed = true; } });
   if (changed) save();
 }
+function pastLine(p) {
+  return p.result === 'done' ? '달성 · ' + p.done + '/' + p.goal + '회' : p.result === 'stopped' ? '중단 · ' + p.goal + '회 중 ' + p.done + '회' : p.goal + '회 중 ' + p.done + '회 · 종료';
+}
 function periodLine(v) {
-  const st = status(v);
-  if (st === 'wait') return '시작 전 · 주 ' + v.target + '회 × ' + v.weeks + '주';
+  if (!v.run) return v.past.length ? pastLine(v.past[v.past.length - 1]) : '';
   const done = periodCount(v), g = goal(v);
-  if (st === 'ended') return done >= g ? '달성 · ' + done + '/' + g + '회' : g + '회 중 ' + done + '회 · 종료';
-  return done + '/' + g + '회 · ' + (weekIdx(v) + 1) + '주차/' + v.wt.length + '주' + (done >= g ? ' · 달성' : '') + (v.routine ? '' : ' · 쉬는 중');
+  return done + '/' + g + '회 · ' + (weekIdx(v) + 1) + '주차/' + v.run.wt.length + '주' + (done >= g ? ' · 달성' : '');
 }
 function weekDates() {
   const now = new Date();
@@ -216,7 +230,7 @@ function lastDate(vid) {
   const d = state.logs.filter(l => l.vid === vid).map(l => l.date).sort().pop();
   return d ? d.slice(5).replace('-', '.') : null;
 }
-function routine() { return state.videos.filter(v => v.routine); }
+function routine() { return state.videos.filter(v => v.run); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function thumb(id) { return 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg'; }
 function toast(msg) {
@@ -280,7 +294,7 @@ function renderHome() {
     return (state.logs.length ? streakCard() : '') + '<div class="card"><div class="empty"><p>이번 주에 할 운동 영상을 등록해 보세요.</p><button class="primary" data-act="go-add">첫 영상 추가</button></div></div>';
   }
   if (list.length === 0) {
-    return streakCard() + '<div class="card"><div class="empty"><p>이번 주 루틴으로 고른 영상이 없어요.<br>영상 탭에서 루틴을 켜 주세요.</p><button class="primary" data-act="tab" data-tab="videos">영상 고르기</button></div></div>';
+    return streakCard() + '<div class="card"><div class="empty"><p>진행 중인 루틴이 없어요.<br>영상 탭에서 루틴을 시작해 보세요.</p><button class="primary" data-act="tab" data-tab="videos">영상 고르기</button></div></div>';
   }
   let done = 0, goal = 0;
   list.forEach(v => { done += Math.min(weekCount(v.id), tgt(v)); goal += tgt(v); });
@@ -309,21 +323,21 @@ function renderHome() {
 }
 
 function videoCard(v) {
-  const st = status(v), total = totalCount(v.id);
-  const pct = st === 'wait' ? 0 : Math.round(Math.min(1, periodCount(v) / goal(v)) * 100);
+  const line = periodLine(v);
   return '<div class="card vcard" data-act="detail" data-id="' + v.id + '"><div class="top">'
     + '<img class="thumb" src="' + thumb(v.id) + '" alt="">'
     + '<div class="grow"><div class="title2">' + esc(v.title) + '</div>'
-    + (st !== 'wait' ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : '')
-    + '<div class="sub">' + periodLine(v) + ' · 누적 ' + total + '회</div></div>'
+    + (v.run ? '<div class="bar"><i style="width:' + Math.round(Math.min(1, periodCount(v) / goal(v)) * 100) + '%"></i></div>' : '')
+    + '<div class="sub">' + (line ? line + ' · ' : '') + '누적 ' + totalCount(v.id) + '회</div></div>'
     + '<span class="chev" aria-hidden="true">›</span></div></div>';
 }
 
 function renderDetail() {
   const v = state.videos.find(x => x.id === detailId);
   const today = ymd(new Date());
-  const st = status(v);
-  const pe = v.start ? periodEnd(v) : null;
+  const pe = v.run ? periodEnd(v) : null;
+  const ws = mondayOf(new Date());
+  const lastPast = v.past.length ? v.past[v.past.length - 1] : null;
   const y = calMonth.getFullYear(), m = calMonth.getMonth();
   const prefix = y + '-' + String(m + 1).padStart(2, '0') + '-';
   const dates = new Set(state.logs.filter(l => l.vid === v.id).map(l => l.date));
@@ -338,21 +352,26 @@ function renderDetail() {
   for (let d = 1; d <= days; d++) {
     const date = prefix + String(d).padStart(2, '0');
     const on = dates.has(date);
-    cal += '<button class="cday' + (on ? ' on' : '') + (date === today ? ' today' : '') + (pe && date >= v.start && date <= pe ? ' inp' : '') + (date > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + date + '"'
+    cal += '<button class="cday' + (on ? ' on' : '') + (date === today ? ' today' : '') + (pe && date >= v.run.start && date <= pe ? ' inp' : '') + (date > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + date + '"'
       + (date !== today ? ' disabled' : '') + ' aria-label="' + date + (on ? ' 완료' : ' 미완료') + '">' + d + '</button>';
   }
   return '<button class="back" data-act="back">‹ 내 영상</button>'
     + '<div class="hero" data-act="play" data-id="' + v.id + '"><img src="' + thumb(v.id) + '" alt=""></div>'
     + '<div class="dtitle">' + esc(v.title) + '</div>'
     + '<button class="primary" style="width:100%;margin-bottom:14px" data-act="play" data-id="' + v.id + '">재생</button>'
-    + '<div class="card"><h2>목표</h2>'
-    + '<div class="sub" style="margin-bottom:4px">' + (st === 'wait' ? '아직 시작하지 않았어요. 루틴에 추가하면 이번 주부터 시작해요.'
-        : (st === 'ended' ? '기간 종료 · ' : '') + md(v.start) + ' ~ ' + md(periodEnd(v))) + '</div>'
-    + (st !== 'wait' ? '<div class="row-between"><b>' + periodLine(v) + '</b></div><div class="bar"><i style="width:' + Math.round(Math.min(1, periodCount(v) / goal(v)) * 100) + '%"></i></div>' : '')
-    + '<div class="setrow"><span>이번 주 루틴</span><button class="small' + (v.routine ? ' on' : '') + '" data-act="routine" data-id="' + v.id + '" aria-pressed="' + v.routine + '">' + (v.routine ? '루틴 ✓' : st === 'ended' ? '다시 시작' : '루틴에 추가') + '</button></div>'
+    + (v.run
+      ? '<div class="card"><h2>진행 중인 루틴</h2>'
+        + '<div class="sub" style="margin-bottom:4px">' + md(v.run.start) + ' ~ ' + md(pe) + '</div>'
+        + '<div class="row-between"><b>' + periodLine(v) + '</b></div><div class="bar"><i style="width:' + Math.round(Math.min(1, periodCount(v) / goal(v)) * 100) + '%"></i></div>'
     + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + tgt(v) + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span></div>'
     + '<div class="setrow"><span>기간</span><span class="step"><button class="small" data-act="p-minus" data-id="' + v.id + '" aria-label="기간 줄이기">−</button>' + v.weeks + '주<button class="small" data-act="p-plus" data-id="' + v.id + '" aria-label="기간 늘리기">+</button></span></div>'
-    + (st === 'ended' ? '<p class="sub" style="margin-top:6px">목표와 기간은 다시 시작할 때 적용돼요.</p>' : '') + '</div>'
+        + '<button style="width:100%;margin-top:10px" data-act="stop" data-id="' + v.id + '">루틴 그만하기</button></div>'
+      : '<div class="card"><h2>' + (lastPast ? '다시 시작' : '루틴 시작') + '</h2>'
+        + (lastPast ? '<div class="sub" style="margin-bottom:4px">지난 루틴 · ' + pastLine(lastPast) + ' (' + md(lastPast.start) + ' ~ ' + md(lastPast.end) + ')</div>' : '')
+    + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="t-minus" data-id="' + v.id + '" aria-label="목표 줄이기">−</button>주 ' + tgt(v) + '회<button class="small" data-act="t-plus" data-id="' + v.id + '" aria-label="목표 늘리기">+</button></span></div>'
+    + '<div class="setrow"><span>기간</span><span class="step"><button class="small" data-act="p-minus" data-id="' + v.id + '" aria-label="기간 줄이기">−</button>' + v.weeks + '주<button class="small" data-act="p-plus" data-id="' + v.id + '" aria-label="기간 늘리기">+</button></span></div>'
+        + '<p class="sub" style="margin:8px 0 10px"><b>총 ' + (v.target * v.weeks) + '회</b> · ' + md(ws) + ' ~ ' + md(addDays(ws, v.weeks * 7 - 1)) + '</p>'
+        + '<button class="on" style="width:100%" data-act="start" data-id="' + v.id + '">' + (lastPast ? '다시 시작' : '루틴 시작') + '</button></div>')
     + '<div class="card"><h2>수행 이력</h2>'
     + '<div class="stats"><div class="stat"><span class="sub">지금까지</span><b>' + totalCount(v.id) + '회</b></div>'
     + '<div class="stat"><span class="sub">' + (m + 1) + '월</span><b>' + monthCount + '회</b></div>'
@@ -369,18 +388,23 @@ function renderVideos() {
   let html = '';
   if (adding) {
     const ws = mondayOf(new Date());
+    const full = routine().length >= MAX_ROUTINE;
+    const startNow = !full && addStart !== false;
     html += '<div class="card"><h2>영상 추가</h2>'
       + '<input type="url" id="add-url" placeholder="https://youtu.be/..." autocomplete="off" value="' + esc(addUrl) + '">'
       + '<div class="err" id="add-err"></div>'
-      + '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="minus" aria-label="목표 줄이기">−</button>주 ' + addTarget + '회<button class="small" data-act="plus" aria-label="목표 늘리기">+</button></span></div>'
-      + '<div class="setrow"><span>기간</span><span class="step"><button class="small" data-act="w-minus" aria-label="기간 줄이기">−</button>' + addWeeks + '주<button class="small" data-act="w-plus" aria-label="기간 늘리기">+</button></span></div>'
-      + '<p class="sub" style="margin:8px 0 14px"><b>총 ' + (addTarget * addWeeks) + '회</b> · ' + md(ws) + ' ~ ' + md(addDays(ws, addWeeks * 7 - 1)) + '</p>'
+      + '<div class="setrow"><span>바로 루틴 시작</span><button class="small' + (startNow ? ' on' : '') + '" data-act="add-start" aria-pressed="' + startNow + '"' + (full ? ' disabled' : '') + '>' + (startNow ? '켜짐 ✓' : '꺼짐') + '</button></div>'
+      + (startNow
+        ? '<div class="setrow"><span>주간 목표</span><span class="step"><button class="small" data-act="minus" aria-label="목표 줄이기">−</button>주 ' + addTarget + '회<button class="small" data-act="plus" aria-label="목표 늘리기">+</button></span></div>'
+          + '<div class="setrow"><span>기간</span><span class="step"><button class="small" data-act="w-minus" aria-label="기간 줄이기">−</button>' + addWeeks + '주<button class="small" data-act="w-plus" aria-label="기간 늘리기">+</button></span></div>'
+          + '<p class="sub" style="margin:8px 0 14px"><b>총 ' + (addTarget * addWeeks) + '회</b> · ' + md(ws) + ' ~ ' + md(addDays(ws, addWeeks * 7 - 1)) + '</p>'
+        : '<p class="sub" style="margin:8px 0 14px">' + (full ? '진행 중인 루틴이 5개라 보관함에 저장돼요.' : '보관함에 저장돼요. 루틴은 영상 상세에서 시작할 수 있어요.') + '</p>')
       + '<div class="actions"><button data-act="cancel-add">취소</button><button class="primary" data-act="submit-add">추가</button></div></div>';
   } else {
     html += '<button style="width:100%" class="' + (state.videos.length === 0 ? 'primary' : '') + '" data-act="open-add">+ 영상 추가</button>';
   }
-  const on = routine(), off = state.videos.filter(v => !v.routine);
-  if (on.length) html += '<div class="section"><h2>이번 주 루틴</h2><span class="sub">' + on.length + '/' + MAX_ROUTINE + '</span></div>' + on.map(videoCard).join('');
+  const on = routine(), off = state.videos.filter(v => !v.run);
+  if (on.length) html += '<div class="section"><h2>진행 중인 루틴</h2><span class="sub">' + on.length + '/' + MAX_ROUTINE + '</span></div>' + on.map(videoCard).join('');
   if (off.length) html += '<div class="section"><h2>보관함</h2><span class="sub">' + off.length + '개</span></div>' + off.map(videoCard).join('');
   if (!state.videos.length && !adding) html += '<p class="sub" style="text-align:center;margin-top:16px">등록한 영상이 여기에 모여요.</p>';
   return html;
@@ -407,14 +431,14 @@ async function submitAdd() {
   err.textContent = '';
   input.disabled = true;
   const title = await fetchTitle(id);
-  const asRoutine = routine().length < MAX_ROUTINE;
-  const nv = { id, title, target: addTarget, weeks: addWeeks, start: null, wt: [], past: [], routine: asRoutine, addedAt: Date.now() };
-  if (asRoutine) startPeriod(nv);
+  const startNow = routine().length < MAX_ROUTINE && addStart !== false;
+  const nv = { id, title, target: addTarget, weeks: addWeeks, run: null, past: [], addedAt: Date.now() };
+  if (startNow) startRun(nv);
   state.videos.push(nv);
   save();
-  adding = false; addTarget = 3; addWeeks = 4; addUrl = '';
+  adding = false; addTarget = 3; addWeeks = 4; addUrl = ''; addStart = null;
   render();
-  toast(asRoutine ? '이번 주부터 ' + nv.weeks + '주 동안 시작해요' : '보관함에 추가했어요 (루틴은 5개까지)');
+  toast(startNow ? '이번 주부터 ' + nv.weeks + '주 동안 시작해요' : '보관함에 저장했어요');
 }
 
 document.addEventListener('click', e => {
@@ -431,7 +455,8 @@ document.addEventListener('click', e => {
   else if (act === 'cal-prev' || act === 'cal-next') { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + (act === 'cal-next' ? 1 : -1), 1); render(); }
   else if (act === 'go-add') { tab = 'videos'; adding = true; render(); document.getElementById('add-url').focus(); }
   else if (act === 'open-add') { adding = true; render(); document.getElementById('add-url').focus(); }
-  else if (act === 'cancel-add') { adding = false; addUrl = ''; render(); }
+  else if (act === 'cancel-add') { adding = false; addUrl = ''; addStart = null; render(); }
+  else if (act === 'add-start') { addStart = addStart === false; render(); }
   else if (act === 'minus' || act === 'plus') { addTarget = Math.min(7, Math.max(1, addTarget + (act === 'plus' ? 1 : -1))); render(); }
   else if (act === 'w-minus' || act === 'w-plus') { addWeeks = Math.min(12, Math.max(1, addWeeks + (act === 'w-plus' ? 1 : -1))); render(); }
   else if (act === 'submit-add') submitAdd();
@@ -446,24 +471,28 @@ document.addEventListener('click', e => {
     } else addLog(id, 'manual', date);
     render();
   }
-  else if (act === 'routine') {
-    if (!v.routine && routine().length >= MAX_ROUTINE) { toast('루틴은 5개까지예요. 하나를 빼고 켜 주세요'); return; }
-    v.routine = !v.routine;
-    if (v.routine && status(v) !== 'active') { startPeriod(v); toast('이번 주부터 ' + v.weeks + '주 동안 시작해요'); }
-    save(); render();
+  else if (act === 'start') {
+    if (routine().length >= MAX_ROUTINE) { toast('루틴은 5개까지예요. 하나를 그만두고 시작해 주세요'); return; }
+    startRun(v); save(); render();
+    toast('이번 주부터 ' + v.weeks + '주 동안 시작해요');
+  }
+  else if (act === 'stop') {
+    if (!confirm('"' + v.title + '" 루틴을 그만할까요?\n지금까지의 결과(' + goal(v) + '회 중 ' + periodCount(v) + '회)는 남고, 다시 시작하면 처음부터 새로 시작해요.')) return;
+    endRun(v, 'stopped'); save(); render();
+    toast('루틴을 그만했어요');
   }
   else if (act === 't-minus' || act === 't-plus') {
     v.target = Math.min(7, Math.max(1, tgt(v) + (act === 't-plus' ? 1 : -1)));
-    if (status(v) === 'active') for (let i = Math.max(0, weekIdx(v)); i < v.wt.length; i++) v.wt[i] = v.target;
+    if (v.run) for (let i = Math.max(0, weekIdx(v)); i < v.run.wt.length; i++) v.run.wt[i] = v.target;
     save(); render();
   }
   else if (act === 'p-minus' || act === 'p-plus') {
-    const active = status(v) === 'active';
-    const min = active ? weekIdx(v) + 1 : 1;
-    const n = Math.min(12, Math.max(min, v.weeks + (act === 'p-plus' ? 1 : -1)));
-    if (n === v.weeks && act === 'p-minus' && active) toast('이미 지난 주보다 짧게는 줄일 수 없어요');
+    const cur = v.run ? v.run.wt.length : v.weeks;
+    const min = v.run ? weekIdx(v) + 1 : 1;
+    const n = Math.min(12, Math.max(min, cur + (act === 'p-plus' ? 1 : -1)));
+    if (n === cur && act === 'p-minus' && v.run) toast('이미 지난 주보다 짧게는 줄일 수 없어요');
     v.weeks = n;
-    if (active) { while (v.wt.length < n) v.wt.push(v.target); v.wt.length = n; }
+    if (v.run) { while (v.run.wt.length < n) v.run.wt.push(v.target); v.run.wt.length = n; }
     save(); render();
   }
   else if (act === 'remove') {
@@ -526,7 +555,7 @@ function stamp(src) {
   session.stamped = true;
   addLog(session.id, src);
   const v = state.videos.find(x => x.id === session.id);
-  const msg = v.routine ? '스탬프 완료 · 이번 주 ' + weekCount(v.id) + '/' + tgt(v) : '스탬프 완료 · 누적 ' + totalCount(v.id) + '회';
+  const msg = v.run ? '스탬프 완료 · 이번 주 ' + weekCount(v.id) + '/' + tgt(v) : '스탬프 완료 · 누적 ' + totalCount(v.id) + '회';
   document.getElementById('p-progress').textContent = msg;
   document.getElementById('p-manual').hidden = true;
   render(); toast(msg);
@@ -550,6 +579,7 @@ window.addEventListener('popstate', () => {
 });
 document.getElementById('p-manual').addEventListener('click', () => stamp('manual'));
 
+save();
 render();
 </script>
 </body>
