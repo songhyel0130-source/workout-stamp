@@ -199,7 +199,7 @@ function periodCount(v) {
 function startRun(v) { v.run = { start: mondayOf(new Date()), wt: Array(v.weeks).fill(v.target) }; }
 function endRun(v, result) {
   const done = periodCount(v), g = goal(v);
-  v.past.push({ start: v.run.start, end: result === 'stopped' ? ymd(new Date()) : periodEnd(v), weeks: v.run.wt.length, goal: g, done, result: result || (done >= g ? 'done' : 'short') });
+  v.past.push({ start: v.run.start, end: result === 'stopped' ? ymd(new Date()) : periodEnd(v), weeks: v.run.wt.length, goal: g, done, result: done >= g ? 'done' : (result || 'short') });
   v.run = null;
 }
 function expire() {
@@ -381,7 +381,8 @@ function renderDetail() {
     + '<div class="days">' + DAY_NAMES.map(n => '<span>' + n + '</span>').join('') + '</div>'
     + '<div class="cal">' + cal + '</div>'
     + '<p class="sub" style="margin-top:10px">오늘 날짜만 직접 체크하거나 지울 수 있어요. 옅게 칠해진 날짜가 목표 기간이에요.</p></div>'
-    + '<button class="danger" data-act="remove" data-id="' + v.id + '">영상 삭제</button>';
+    + (v.run ? '<button class="danger" disabled style="opacity:.4">영상 삭제</button><p class="sub" style="text-align:center;margin-top:6px">진행 중인 루틴이 있으면 삭제할 수 없어요. 루틴을 그만한 뒤 삭제해 주세요.</p>'
+      : '<button class="danger" data-act="remove" data-id="' + v.id + '">영상 삭제</button>');
 }
 
 function renderVideos() {
@@ -477,9 +478,10 @@ document.addEventListener('click', e => {
     toast('이번 주부터 ' + v.weeks + '주 동안 시작해요');
   }
   else if (act === 'stop') {
-    if (!confirm('"' + v.title + '" 루틴을 그만할까요?\n지금까지의 결과(' + goal(v) + '회 중 ' + periodCount(v) + '회)는 남고, 다시 시작하면 처음부터 새로 시작해요.')) return;
+    const achieved = periodCount(v) >= goal(v);
+    if (!confirm('"' + v.title + '" 루틴을 그만할까요?\n' + (achieved ? '목표를 이미 채워서 "달성"으로 기록돼요.' : '지금까지의 결과(' + goal(v) + '회 중 ' + periodCount(v) + '회)는 남고, 다시 시작하면 처음부터 새로 시작해요.'))) return;
     endRun(v, 'stopped'); save(); render();
-    toast('루틴을 그만했어요');
+    toast(achieved ? '달성으로 기록했어요' : '루틴을 그만했어요');
   }
   else if (act === 't-minus' || act === 't-plus') {
     v.target = Math.min(7, Math.max(1, tgt(v) + (act === 't-plus' ? 1 : -1)));
@@ -496,7 +498,8 @@ document.addEventListener('click', e => {
     save(); render();
   }
   else if (act === 'remove') {
-    if (!confirm('"' + v.title + '" 영상을 삭제할까요? 운동한 기록과 연속 기록은 유지돼요.')) return;
+    if (v.run) return;
+    if (!confirm('"' + v.title + '" 영상을 삭제할까요?\n운동한 기록과 연속 기록은 유지되고, 지난 루틴 결과는 사라져요.')) return;
     state.videos = state.videos.filter(x => x.id !== id);
     save();
     if (detailId) history.back(); else render();
