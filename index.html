@@ -48,6 +48,7 @@
   .title2 { font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .grow { flex: 1; min-width: 0; }
   .today-item button { flex-shrink: 0; min-width: 48px; }
+  .today-item button.checked { background: var(--cell); border-color: transparent; color: var(--sub); font-weight: 700; cursor: default; }
   .badge.mute { background: var(--line); color: var(--sub, #777); }
   .badge { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 1px 7px; border-radius: 9px; }
   .days, .cells { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
@@ -319,7 +320,7 @@ function renderHome() {
     + items.map((x, i) => '<div class="today-item" data-act="play" data-id="' + x.v.id + '">'
         + '<img class="thumb" src="' + thumb(x.v.id) + '" alt="">'
         + '<div class="grow"><div class="title">' + esc(x.v.title) + '</div><span class="badge' + (x.todoNow ? '' : ' mute') + '">' + x.label + '</span></div>'
-        + '<button class="small ' + (x.todoNow ? (i === 0 ? 'primary' : '') : 'on') + '">' + (x.todoNow ? '시작' : x.achieved ? '달성' : '완료') + '</button></div>').join('') + '</div>';
+        + '<button class="small ' + (x.todoNow ? (i === 0 ? 'primary' : '') : x.achieved ? 'on' : 'checked') + '"' + (x.todoNow || x.achieved ? '' : ' aria-label="오늘 완료"') + '>' + (x.todoNow ? '시작' : x.achieved ? '달성' : '✓') + '</button></div>').join('') + '</div>';
 
   html += '<div class="card"><div class="row-between"><h2>이번 주</h2><span class="sub">오늘 칸을 누르면 직접 체크</span></div>'
     + '<div class="days">' + w.map((d, i) => '<span class="' + (d === today ? 'now' : '') + '">' + DAY_NAMES[i] + '</span>').join('') + '</div>'
