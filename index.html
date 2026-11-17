@@ -47,6 +47,8 @@
   .title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .title2 { font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .grow { flex: 1; min-width: 0; }
+  .today-item.dim .thumb, .today-item.dim .title { opacity: .5; }
+  .badge.mute { background: var(--line); color: var(--sub, #777); }
   .badge { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 1px 7px; border-radius: 9px; }
   .days, .cells { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
   .days span { text-align: center; font-size: 11px; color: var(--sub); }
@@ -296,18 +298,28 @@ function renderHome() {
   if (list.length === 0) {
     return streakCard() + '<div class="card"><div class="empty"><p>진행 중인 루틴이 없어요.<br>영상 탭에서 루틴을 시작해 보세요.</p><button class="primary" data-act="tab" data-tab="videos">영상 고르기</button></div></div>';
   }
-  let done = 0, goal = 0;
-  list.forEach(v => { done += Math.min(weekCount(v.id), tgt(v)); goal += tgt(v); });
+  let done = 0, wkGoal = 0;
+  list.forEach(v => { done += Math.min(weekCount(v.id), tgt(v)); wkGoal += tgt(v); });
   const todayCount = new Set(state.logs.filter(l => l.date === today).map(l => l.vid)).size;
-  const left = goal - done;
-  let html = streakCard('<div style="text-align:right"><div class="big">' + done + '/' + goal + '</div><div class="sub">이번 주' + (left > 0 ? '' : ' 달성') + '</div></div>');
+  const left = wkGoal - done;
+  let html = streakCard('<div style="text-align:right"><div class="big">' + done + '/' + wkGoal + '</div><div class="sub">이번 주' + (left > 0 ? '' : ' 달성') + '</div></div>');
 
-  const todo = list.map(v => ({ v, left: tgt(v) - weekCount(v.id) })).filter(x => x.left > 0).sort((a, b) => b.left - a.left);
-  html += '<div class="card"><h2>오늘 할 영상</h2>' + (todo.length === 0 ? '<p class="sub">이번 주 목표를 다 채웠어요.</p>'
-    : todo.map((x, i) => '<div class="today-item" data-act="play" data-id="' + x.v.id + '">'
+  // 진행 중인 루틴은 모두 노출. 1: 할 것 / 2: 오늘 완료(주간 남음) / 3: 이번 주 달성·루틴 달성
+  const items = list.map(v => {
+    const left = tgt(v) - weekCount(v.id);
+    const doneToday = doneOn(v.id, today);
+    const routineDone = periodCount(v) >= goal(v);
+    const state2 = routineDone ? '루틴 달성' : left <= 0 ? '이번 주 달성' : left + '회 남음';
+    const todoNow = !doneToday && !routineDone && left > 0;
+    const rank = todoNow ? 0 : (doneToday && !routineDone && left > 0) ? 1 : 2;
+    return { v, left, rank, todoNow, label: (doneToday ? '오늘 완료 ✓ · ' : '') + state2 };
+  }).sort((a, b) => a.rank - b.rank || b.left - a.left);
+  const anyTodo = items.some(x => x.todoNow);
+  html += '<div class="card"><h2>진행 중인 루틴</h2>' + (anyTodo ? '' : '<p class="sub">오늘 할 건 다 했어요.</p>')
+    + items.map((x, i) => '<div class="today-item' + (x.todoNow ? '' : ' dim') + '" data-act="play" data-id="' + x.v.id + '">'
         + '<img class="thumb" src="' + thumb(x.v.id) + '" alt="">'
-        + '<div class="grow"><div class="title">' + esc(x.v.title) + '</div><span class="badge">' + x.left + '회 남음</span></div>'
-        + (i === 0 ? '<button class="primary">시작</button>' : '') + '</div>').join('')) + '</div>';
+        + '<div class="grow"><div class="title">' + esc(x.v.title) + '</div><span class="badge' + (x.todoNow ? '' : ' mute') + '">' + x.label + '</span></div>'
+        + (i === 0 && x.todoNow ? '<button class="primary">시작</button>' : '') + '</div>').join('') + '</div>';
 
   html += '<div class="card"><div class="row-between"><h2>이번 주</h2><span class="sub">오늘 칸을 누르면 직접 체크</span></div>'
     + '<div class="days">' + w.map((d, i) => '<span class="' + (d === today ? 'now' : '') + '">' + DAY_NAMES[i] + '</span>').join('') + '</div>'
