@@ -58,6 +58,7 @@
   .vrow .meta { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
   .cell { height: 30px; border-radius: 7px; background: var(--cell); border: none; padding: 0; color: #04342c; font-size: 14px; font-weight: 700; }
   .cell.on { background: var(--stamp); }
+  .cell.on.prev { background: var(--cell); color: var(--sub); font-weight: 400; }
   .cell.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
   .cell:disabled { cursor: default; }
   .cell.future { opacity: .45; }
@@ -355,8 +356,9 @@ function renderHome() {
     + list.map(v => {
       const cells = w.map(d => {
         const on = state.logs.some(l => l.vid === v.id && l.date === d);
-        return '<button class="cell' + (on ? ' on' : '') + (d === today ? ' today' : '') + (d > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + d + '"'
-          + (d !== today ? ' disabled' : '') + ' aria-label="' + d + (on ? ' 완료' : ' 미완료') + '">' + (on ? '✓' : '') + '</button>';
+        const prev = on && v.run.from && d < v.run.from;
+        return '<button class="cell' + (on ? ' on' : '') + (prev ? ' prev' : '') + (d === today ? ' today' : '') + (d > today ? ' future' : '') + '" data-act="toggle" data-id="' + v.id + '" data-date="' + d + '"'
+          + (d !== today ? ' disabled' : '') + ' aria-label="' + d + (prev ? ' 완료 (이전 루틴)' : on ? ' 완료' : ' 미완료') + '">' + (on ? '✓' : '') + '</button>';
       }).join('');
       return '<div class="vrow"><div class="meta"><span class="title grow">' + esc(v.title) + '</span><span class="sub">' + weekCount(v.id) + '/' + tgt(v) + '</span></div><div class="cells">' + cells + '</div></div>';
     }).join('') + '</div>';
